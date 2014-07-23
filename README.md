@@ -40,6 +40,6 @@ Loads the config as environment variables then execs the provided command. Exist
 
 Settings are done with environment variables.
 
-* REDISENV_HOST -- The location of the Redis instance. Defaults to `127.0.0.1:6379
+* REDISENV_HOST -- The location of the Redis instance. Defaults to `127.0.0.1:6379`.
 * REDISENV_DB -- The Redis database index for the config data. Defaults to 0.
 * REDISENV_KEY -- The key name of the config to read. Defaults to `default`. Useful for storing multiple app configs in the same Redis.
