@@ -3,9 +3,11 @@ package main
 import (
   "flag"
   "fmt"
+  "github.com/hoisie/redis"
   "os"
-  "redis"
+  "os/exec"
   "strings"
+  "strconv"
   "syscall"
 )
 
@@ -14,24 +16,25 @@ func printVersion() {
   os.Exit(0)
 }
 
-func listConfig(client *redis.Client, key string) {
-  value, err := client.Hgetall(key)
+func listConfig(client redis.Client, key string) {
+  value := map[string][]byte{}
+  err   := client.Hgetall(key, value)
 
   if err != nil {
     fmt.Fprintln(os.Stderr, err)
     os.Exit(1)
   }
 
-  for key, value := range value.StringMap() {
+  for key, value := range value {
     fmt.Println(fmt.Sprintf("%s=%s", key, value))
   }
 }
 
-func addConfig(client *redis.Client, key string, nameAndValue string) {
+func addConfig(client redis.Client, key string, nameAndValue string) {
   parts := strings.Split(nameAndValue, "=")
   name := parts[0]
   value := strings.Join(parts[1:len(parts)], "=")
-  _, err := client.Hset(key, name, value)
+  _, err := client.Hset(key, name, []byte(value))
 
   if err != nil {
     fmt.Fprintln(os.Stderr, err)
@@ -39,7 +42,7 @@ func addConfig(client *redis.Client, key string, nameAndValue string) {
   }
 }
 
-func removeConfig(client *redis.Client, key string, name string) {
+func removeConfig(client redis.Client, key string, name string) {
   _, err := client.Hdel(key, name)
 
   if err != nil {
@@ -48,49 +51,68 @@ func removeConfig(client *redis.Client, key string, name string) {
   }
 }
 
-func run(client *redis.Client, key string, command string) {
-  value, err := client.Hgetall(key)
+func run(client redis.Client, key string) {
+  value := map[string][]byte{}
+  err   := client.Hgetall(key, value)
 
   if err != nil {
     fmt.Fprintln(os.Stderr, err)
     os.Exit(111)
   }
 
-  env := make([]string, 0)
+  envs := make([]string, 0)
 
-  for key, value := range value.StringMap() {
-    env = append(env, fmt.Sprintf("%s=%s", key, value))
+  for key, value := range value {
+    envs = append(envs, fmt.Sprintf("%s=%s", key, value))
   }
 
-  syscall.Exec("/bin/sh", []string{"/bin/sh", "-c", command}, env)
+  cmd := exec.Command(flag.Args()[0], flag.Args()[1:]...)
+  cmd.Env = envs
+  cmd.Stderr = os.Stderr
+  cmd.Stdout = os.Stdout
+  cmd.Stdin = os.Stdin
+  err = cmd.Run()
+  if cmd.Process == nil {
+    fmt.Fprintf(os.Stderr, "redis-env: %s\n", err)
+    os.Exit(1)
+  }
+  os.Exit(cmd.ProcessState.Sys().(syscall.WaitStatus).ExitStatus())
 }
 
 func main() {
   version := flag.Bool("version", false, "Print version and exit")
   list := flag.Bool("list", false, "List config vars")
-  netaddr := flag.String("netaddr", "tcp:127.0.0.1:6379", "Redis netaddr (e.g. tcp:120.0.0.1:6379")
-  dbIndex := flag.Int("db", 0, "Redis database index")
-  name := flag.String("name", "default", "Config name")
-  runCommand := flag.String("run", "", "Command to run")
   remove := flag.String("remove", "", "Config var to remove")
   add := flag.String("add", "", "Config var to add")
   flag.Parse()
 
+  var key = os.Getenv("REDISENV_KEY")
+  if key == "" {
+    key = "default"
+  }
+  var host = os.Getenv("REDISENV_HOST")
+  if host == "" {
+    host = "127.0.0.1:6379"
+  }
+  var udb = os.Getenv("REDISENV_DB")
+  var db int
+  if udb != "" {
+    db, _ = strconv.Atoi(udb)
+  }
+
+  var client redis.Client
+  client.Addr = host
+  client.Db = db
+
   if *version {
     printVersion()
+  } else if *list {
+    listConfig(client, key)
+  } else if len(*remove) > 0 {
+    removeConfig(client, key, *remove)
+  } else if len(*add) > 0 {
+    addConfig(client, key, *add)
   } else {
-    client := redis.New(*netaddr, *dbIndex, "")
-    key := fmt.Sprintf("redis-env:%s", *name)
-    fmt.Println(key)
-
-    if len(*runCommand) > 0 {
-      run(client, key, *runCommand)
-    } else if len(*remove) > 0 {
-      removeConfig(client, key, *remove)
-    } else if len(*add) > 0 {
-      addConfig(client, key, *add)
-    } else if *list {
-      listConfig(client, key)
-    }
+    run(client, key)
   }
 }
