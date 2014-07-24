@@ -60,7 +60,7 @@ func run(client redis.Client, key string) {
     os.Exit(111)
   }
 
-  envs := make([]string, 0)
+  envs := os.Environ()
 
   for key, value := range value {
     envs = append(envs, fmt.Sprintf("%s=%s", key, value))
